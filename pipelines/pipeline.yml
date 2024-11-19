@@ -1,0 +1,71 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  azureSubscription: '<ServiceConnectionName>'
+  resourceGroup: '<ResourceGroupName>'
+  workspaceName: '<WorkspaceName>'
+  computeName: '<ComputeClusterName>'
+  modelName: '<ModelName>'
+  deploymentName: '<DeploymentName>'
+
+stages:
+- stage: Train
+  displayName: Train Model
+  jobs:
+  - job: Train
+    steps:
+    - task: AzureMLCompute@1
+      inputs:
+        azureSubscription: $(azureSubscription)
+        workspaceName: $(workspaceName)
+        resourceGroupName: $(resourceGroup)
+        computeType: 'AmlCompute'
+        computeName: $(computeName)
+        minNodes: 0
+        maxNodes: 4
+        vmSize: 'STANDARD_DS11_V2'
+
+    - task: AzureMLRun@1
+      inputs:
+        azureSubscription: $(azureSubscription)
+        workspaceName: $(workspaceName)
+        resourceGroupName: $(resourceGroup)
+        experimentName: 'train-model'
+        scriptPath: './train/train_model.py'
+        computeTarget: $(computeName)
+        condaEnvironmentFile: './environment.yml'
+
+- stage: Register
+  displayName: Register Model
+  jobs:
+  - job: RegisterModel
+    steps:
+    - task: AzureMLModelRegister@1
+      inputs:
+        azureSubscription: $(azureSubscription)
+        workspaceName: $(workspaceName)
+        resourceGroupName: $(resourceGroup)
+        modelName: $(modelName)
+        modelPath: 'outputs/model.pkl'
+        description: 'Registered from DevOps Pipeline'
+
+- stage: Deploy
+  displayName: Deploy Model
+  jobs:
+  - job: DeployModel
+    steps:
+    - task: AzureMLModelDeploy@1
+      inputs:
+        azureSubscription: $(azureSubscription)
+        workspaceName: $(workspaceName)
+        resourceGroupName: $(resourceGroup)
+        modelName: $(modelName)
+        deploymentName: $(deploymentName)
+        inferenceConfig: 'inference-config.json'
+        deploymentConfig: 'deployment-config.json'
+        targetComputeType: 'Aks'
+        targetComputeName: $(computeName)

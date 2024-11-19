@@ -1,0 +1,79 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  azureSubscription: '<ServiceConnectionName>' # Replace with your Azure service connection
+  resourceGroup: '<ResourceGroup>'
+  amlWorkspace: '<AMLWorkspaceName>'
+  modelName: '<ModelName>'
+  modelFilePath: 'model.pkl'
+  imageName: '<ContainerImageName>'
+  deploymentName: '<DeploymentName>'
+  aksCluster: '<AKSClusterName>'
+
+stages:
+- stage: Build
+  displayName: Build and Validate Model
+  jobs:
+  - job: Build
+    displayName: Train and Package Model
+    steps:
+    - task: UsePythonVersion@1
+      inputs:
+        versionSpec: '3.x'
+        addToPath: true
+
+    - script: |
+        pip install azureml-sdk
+        python train_model.py  # Script to train and save `model.pkl`
+      displayName: Train Model
+
+    - task: PublishPipelineArtifact@1
+      inputs:
+        targetPath: '$(Pipeline.Workspace)/model.pkl'
+        artifactName: 'model'
+        publishLocation: 'pipeline'
+
+- stage: Register
+  displayName: Register Model in Azure ML
+  jobs:
+  - job: RegisterModel
+    displayName: Register Model
+    steps:
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: $(azureSubscription)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az ml model register \
+            --name $(modelName) \
+            --path $(Pipeline.Workspace)/model.pkl \
+            --resource-group $(resourceGroup) \
+            --workspace-name $(amlWorkspace)
+      displayName: Register Model
+
+- stage: Deploy
+  displayName: Deploy Model
+  jobs:
+  - job: DeployModel
+    displayName: Deploy Model to AKS
+    steps:
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: $(azureSubscription)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az ml model deploy \
+            --name $(deploymentName) \
+            --model $(modelName):1 \
+            --resource-group $(resourceGroup) \
+            --workspace-name $(amlWorkspace) \
+            --compute-target $(aksCluster) \
+            --inference-config inference-config.json \
+            --deployment-config deployment-config.json
+      displayName: Deploy Model
